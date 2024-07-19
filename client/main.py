@@ -14,7 +14,9 @@ WHATSAPP_BUSINESS_ACCOUNT_ID = os.getenv('WHATSAPP_BUSINESS_ACCOUNT_ID')
 created_flow_id = ""
 messaging_url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
 
-auth_header = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
+auth_header = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {ACCESS_TOKEN}"}
 
 messaging_headers = {
     "Content-Type": "application/json",
@@ -23,40 +25,71 @@ messaging_headers = {
 
 @app.route("/create-flow", methods=["POST"])
 def create_flow():
+    print("TEST HOT RELOAD")
     flow_base_url = (
         f"https://graph.facebook.com/v18.0/{WHATSAPP_BUSINESS_ACCOUNT_ID}/flows"
     )
-    flow_creation_payload = {"name": "survey_flow", "categories": '["SURVEY"]'}
-    flow_create_response = requests.request(
-        "POST", flow_base_url, headers=auth_header, data=flow_creation_payload
-    )
-
+    flow_creation_payload = {"name": "survey_flow_5", "categories": ["SURVEY"]}  # Use a list, not a string representation of a list
     try:
-        global created_flow_id
-        created_flow_id = flow_create_response.json()["id"]
+        flow_create_response = requests.post(
+            flow_base_url, headers=auth_header, data=flow_creation_payload  # Use json parameter
+        )
+        flow_create_response.raise_for_status()  # Raises an HTTPError if the response was an HTTP error status
+
+        response_json = flow_create_response.json()
+        created_flow_id = response_json["id"]
         graph_assets_url = f"https://graph.facebook.com/v18.0/{created_flow_id}/assets"
 
+        # Call your functions to upload flow JSON and publish flow
         upload_flow_json(graph_assets_url)
         publish_flow(created_flow_id)
 
         print("FLOW CREATED!")
         return make_response("FLOW CREATED", 200)
-    except:
-        return make_response("ERROR", 500)
+    except requests.exceptions.RequestException as e:
+        # Handle request exceptions (network issues, bad responses, etc.)
+        print(f"Request exception: {e}")
+        return make_response(f"ERROR: {e}", 500)
+    except KeyError as e:
+        # Handle JSON response parsing errors
+        print(f"KeyError: {e} - Response: {flow_create_response.text}")
+        return make_response(f"ERROR: KeyError {e}", 500)
+    except Exception as e:
+        # Handle any other exceptions
+        print(f"Unexpected error: {e}")
+        return make_response(f"ERRORR: {e}", 500)
     
 
 def upload_flow_json(graph_assets_url):
-    flow_asset_payload = {"name": "flow.json", "asset_type": "FLOW_JSON"}
-    files = [("file", ("survey.json", open("survey.json", "rb"), "application/json"))]
-
-    res = requests.request(
-        "POST",
-        graph_assets_url,
-        headers=auth_header,
-        data=flow_asset_payload,
-        files=files,
-    )
-    print(res.json())
+    try:
+        with open("survey.json", "rb") as file:
+            files = {
+                'file': ('survey.json', file, 'application/json')
+            }
+            data = {
+                'name': 'flow.json',
+                'asset_type': 'FLOW_JSON'
+            }
+            headers = {
+                'Authorization': f'Bearer {ACCESS_TOKEN}'
+            }
+            
+            res = requests.post(
+                graph_assets_url,
+                headers=headers,
+                data=data,
+                files=files
+            )
+        
+        print(f"Response status code: {res.status_code}")
+        print(f"Response content: {res.content}")
+        res.raise_for_status()
+    except FileNotFoundError:
+        print("Error: survey.json file not found")
+    except requests.exceptions.RequestException as e:
+        print(f"Error uploading flow JSON: {e}")
+        if e.response is not None:
+            print(f"Response content: {e.response.content}")
 
 
 def publish_flow(flow_id):
